@@ -1102,6 +1102,29 @@
     :error nil
   })
 
+(defn- make-history-builtin
+  []
+  @{
+    :pre-fork
+      (fn builtin-history [self args] nil)
+    :post-fork
+      (fn builtin-history
+        [self args]
+        (let [hist-file (-> (fiber/current)
+                            (fiber/getenv)
+                            (get '*hist-file*)
+                            (get :ref)
+                            (first))
+              hist-array (->> hist-file
+                              (slurp)
+                              (string/split "\n"))
+              hist-str (-> (seq [i :range [1 (length hist-array)]]
+                                (string i " " (get hist-array (- i 1))))
+                           (string/join "\n"))
+             ]
+          (file/write stdout hist-str "\n")))
+   })
+
 (set *builtins* @{
   "clear" make-clear-builtin
   "cd" make-cd-builtin
@@ -1112,6 +1135,7 @@
   "pushd" make-pushd-builtin
   "popd" make-popd-builtin
   "export" make-export-builtin
+  "history" make-history-builtin
 })
 
 # References
