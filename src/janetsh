@@ -182,6 +182,17 @@
        (empty? (parser/state p))
        (peg/match implicit-checker-peg buf)))
 
+(var pwd (os/cwd))
+
+(defn- update-pwd-vars
+  []
+  (let [os-cwd (os/cwd)]
+    (if-not (= pwd os-cwd)
+      (do
+        (os/setenv "OLDPWD" pwd)
+        (os/setenv "PWD" os-cwd)
+        (set pwd os-cwd)))))
+
 (defmacro- hookit
   [expresion_type & f]
   (with-syms [$res]
@@ -197,6 +208,7 @@
                 (error e))))
        (if (function? *post-exec-hook*)
          (apply *post-exec-hook* ,expresion_type ',f [,$res]))
+       (update-pwd-vars)
      ,$res)))
 
 (defn- getchunk [buf p]

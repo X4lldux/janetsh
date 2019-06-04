@@ -889,9 +889,13 @@
         [self args]
         (try
           (os/cd ;
-            (if (empty? args)
+           (cond
+             (empty? args)
                [(or (os/getenv "HOME") (error "cd: HOME not set"))]
-               args))
+               (= args ['-]) ["-"]
+               (= args ["-"])
+               [(os/getenv "OLDPWD")]
+             args))
           ([e] (put self :error e))))
     :post-fork
       (fn builtin-cd
