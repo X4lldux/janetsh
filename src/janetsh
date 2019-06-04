@@ -9,8 +9,29 @@
 (var *script* nil)
 (var *parens* false)
 (var *handleopts* true)
+
+
+# function should accept:
+# - type of expression:
+#     :shell -- when is a regular command (without paranes)
+#     :janet -- when is a Janet expression
+# - quoted expression to be executed
 (var *pre-exec-hook* nil)
+
+# function should accept:
+# - type of expression:
+#  :shell -- when is a regular command (without paranes)
+#  :janet -- when is a Janet expression
+# - quoted expression to be executed
+# - result returned by expression
 (var *post-exec-hook* nil)
+
+# function should accept:
+# - type of expression:
+#  :shell -- when is a regular command (without paranes)
+#  :janet -- when is a Janet expression
+# - quoted expression to be executed
+# - error thrown by expression
 (var *post-crash-exec-hook* nil)
 
 (def- user-env (fiber/getenv (fiber/current)))
