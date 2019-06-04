@@ -9,6 +9,8 @@
 (var *script* nil)
 (var *parens* false)
 (var *handleopts* true)
+(var *pre-exec-hook* nil)
+(var *post-exec-hook* nil)
 
 (def- user-env (fiber/getenv (fiber/current)))
 
@@ -158,15 +160,26 @@
        (empty? (parser/state p))
        (peg/match implicit-checker-peg buf)))
 
+(defmacro- hookit
+  [expresion_type & f]
+  (with-syms [$res]
+    ~(do
+       (if (function? *pre-exec-hook*)
+         (apply *pre-exec-hook* ,expresion_type [',f]))
+       (var ,$res (do ,;f))
+       (if (function? *post-exec-hook*)
+         (apply *post-exec-hook* ,expresion_type ',f [,$res]))
+     ,$res)))
+
 (defn- getchunk [buf p]
   (sh/update-all-jobs-status)
   (def prompt (try (*get-prompt* p) ([e] "$ ")))
   (when (getline prompt buf)
-    (when (want-implicit-parens buf p)
-      (let [line (string buf)]
-        (buffer/clear buf)
-        (buffer/format buf "(sh/$? %s)\n" line)))
-    buf))
+    (let [line (string buf)]
+      (buffer/clear buf)
+      (if (want-implicit-parens line p)
+        (buffer/format buf "(hookit :shell (sh/$? %s))\n" line)
+        (buffer/format buf "(hookit :janet %s)\n" line)))))
 
 (setdyn :pretty-format "%.40p")
 
