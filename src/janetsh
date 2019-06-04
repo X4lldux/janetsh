@@ -11,6 +11,7 @@
 (var *handleopts* true)
 (var *pre-exec-hook* nil)
 (var *post-exec-hook* nil)
+(var *post-crash-exec-hook* nil)
 
 (def- user-env (fiber/getenv (fiber/current)))
 
@@ -166,7 +167,13 @@
     ~(do
        (if (function? *pre-exec-hook*)
          (apply *pre-exec-hook* ,expresion_type [',f]))
-       (var ,$res (do ,;f))
+       (var ,$res
+             (try
+               (do ,;f)
+               ([e]
+                (if (function? *post-crash-exec-hook*)
+                  (apply *post-crash-exec-hook* ,expresion_type ',f [e]))
+                (error e))))
        (if (function? *post-exec-hook*)
          (apply *post-exec-hook* ,expresion_type ',f [,$res]))
      ,$res)))
