@@ -119,21 +119,42 @@ symbol as a value, only structs, arrays, tuples, etc."
     :main (+ :btuple :struct :ptuple)})
 
 (defn- as-str [s]
-  (string `"` s `"`))
+  (let [es (->> s
+                (string/replace-all "\\ " " ")
+                (string/replace-all "\\" ""))]
+  (string `"` es `"`)))
+
+(defn- to-dquote [s]
+  (string/replace "'" "\"" s))
+
+(defn- escape-dquotes [s]
+  (string/replace-all "\"" "\\\"" s))
+
+(defn- add-colon [s]
+  (string ":" s))
 
 (def- janetsh-grammar
   "Grammar to escape the non janet values with strings."
   ~{:ws (capture (set " \v\t\r\f\n\0"))
     :janet (capture (drop ,janet-value))
     :pipe (capture "|")
-    :redirect (capture (set "<>"))
-    :token (/ (capture (some ,symchars)) ,as-str)
-    :value (+ :janet :pipe :redirect :token :ws)
+    :redirect (* (any (/ (capture (some (range "09"))) ,add-colon))  (capture (+ "<" ">" ">>")))
+    :hex (range "09" "af" "AF")
+    :escape (* "\\" (+ (set "ntrvzf0e\"\\") (* "x" :hex :hex)))
+    :dquoted (capture (* "\"" (any (+ :escape (drop :ws) (if-not "\"" 1))) "\""))
+    :squoted  (* (/ (<- "'") ,to-dquote) (/ (<- (any (+ :escape (drop :ws) (if-not "'" 1)))) ,escape-dquotes) (/ (<- "'") ,to-dquote))
+    :envvar (capture (* "$" (some ,symchars)))
+    :token (/ (capture (some (+ ,symchars "\\ " "\\"))) ,as-str)
+    :value (+ :janet :pipe :redirect :envvar :token :ws :dquoted :squoted)
     :main (% (any :value))})
 
 (defn- escape-raw-line [line]
   "Escape the non-janet values in 'line' as strings."
   (get (peg/match janetsh-grammar line) 0))
+
+(defn erl [line]
+  "Escape the non-janet values in 'line' as strings."
+  (print (escape-raw-line line)))
 
 (defn- getchunk [buf p]
   (sh/update-all-jobs-status)
