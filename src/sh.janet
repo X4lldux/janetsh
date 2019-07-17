@@ -68,17 +68,17 @@
     (error "bug"))
   (set jobs @[])
   (set pid2proc @{})
-  
+
   (rebuild-unsafe-child-cleanup-array)
   (register-atexit-cleanup)
-  
+
   (set on-tty
     (and (isatty STDIN_FILENO)
          (= (tcgetpgrp STDIN_FILENO) (getpgrp))))
   (if is-subshell
     (set-noninteractive-signal-handlers)
     (set-interactive-signal-handlers))
-  
+
   (set initialized true)
   nil)
 
@@ -107,9 +107,9 @@
 
 (defn- new-proc []
   @{
-    :args @[]         # A list of arguments used to start the proc. 
+    :args @[]         # A list of arguments used to start the proc.
     :env @{}          # New environment variables to set in proc.
-    :redirs @[]       # A list of 3 tuples. [fd|path ">"|"<"|">>" fd|path] 
+    :redirs @[]       # A list of 3 tuples. [fd|path ">"|"<"|">>" fd|path]
     :pid nil          # PID of process after it has been started.
     :termsig nil      # Signal used to terminate job.
     :exit-code nil    # Exit code of the process when it has exited, or 127 on signal exit.
@@ -164,11 +164,11 @@
   [j]
   (number? (job-exit-code j)))
 
-(defn signal-job 
+(defn signal-job
   [j sig]
   (try
     (kill (- (j :pgid)) sig)
-  ([e] 
+  ([e]
     (when (not= ESRCH (dyn :errno))
       (error e)))))
 
@@ -186,7 +186,7 @@
       # of missing process so we don't leak processes.
       # One example where this may happen is if the child
       # dies before it has a chance to call setpgid.
-      (try 
+      (try
         (waitpid (p :pid) (bor WUNTRACED WNOHANG))
         ([e] nil))
       (put p :exit-code 129))))
@@ -245,7 +245,7 @@
   (update-all-jobs-status)
   (set jobs (filter (complement job-complete?) jobs))
   (set pid2proc @{})
-  
+
   (rebuild-unsafe-child-cleanup-array)
 
   (each j jobs
@@ -290,7 +290,7 @@
 
 (defn- close-redir-sources
   [redirs]
-  
+
   (defn is-std-fileno
     [fd]
     (find (partial = fd) [STDIN_FILENO STDOUT_FILENO STDERR_FILENO]))
@@ -311,7 +311,7 @@
     (var sinkfd (get r 0))
     (var src  (get r 2))
     (var srcfd nil)
-    
+
     (when (or (tuple? src) (array? src))
       (when (not= (length src) 1)
         (error "redirect target tuple has more than one member."))
@@ -329,7 +329,7 @@
       :core/file
         (set srcfd (file/fileno src))
       (error "unsupported redirect target type"))
-    
+
     (dup2 srcfd sinkfd)))
 
 (defn pipes
@@ -368,14 +368,14 @@
     # The subshells should be able to run jobs
     # of it's own if it wants to.
     (init true)
-    
+
     (var rc 0)
     (try
       (f (tuple/slice (proc :args) 1))
       ([e]
         (set rc 1)
         (file/write stderr (string "error: " e "\n"))))
-    
+
     (file/flush stdout)
     (file/flush stderr)
     (os/exit rc))
@@ -387,7 +387,7 @@
     (table? entry-point)
       (run-subshell-proc (fn [eargs] (:post-fork entry-point eargs)))
     (exec ;(map string (proc :args)))))
-    
+
 (defn launch-job
   [j in-foreground]
   (when (not initialized)
@@ -399,11 +399,11 @@
       # miss any pid's and doesn't
       # interrupt us setting up the pgid.
       (disable-cleanup-signals)
-      
+
       # Flush output files before we fork.
       (file/flush stdout)
       (file/flush stderr)
-      
+
       (def procs (j :procs))
       (var pipes nil)
       (var infd  STDIN_FILENO)
@@ -411,10 +411,10 @@
       (var errfd STDERR_FILENO)
 
       (for i 0 (length procs)
-        (let 
+        (let
           [proc (get procs i)
            has-next (not= i (dec (length procs)))]
-          
+
           (if has-next
             (do
               (set pipes (pipe))
@@ -430,9 +430,9 @@
           # in both the parent and the child to avoid a race
           # condition when we start waiting on the process group before
           # it is actually created.
-          # 
-          # [1] https://www.gnu.org/software/libc/manual/html_node/Launching-Jobs.html#Launching-Jobs 
-          (defn 
+          #
+          # [1] https://www.gnu.org/software/libc/manual/html_node/Launching-Jobs.html#Launching-Jobs
+          (defn
             post-fork [pid]
             (when (not (j :pgid))
               (put j :pgid pid))
@@ -454,12 +454,12 @@
             (put pid2proc pid proc))
 
           (var pid (fork))
-          
+
           (when (zero? pid)
             (try # Prevent a child from ever returning after an error.
               (do
                 (set pid (getpid))
-                
+
                 # TODO XXX.
                 # We want to discard any buffered input after we fork.
                 # There is currently no way to do this. (fpurge stdin)
@@ -495,7 +495,7 @@
       # which also configures the cleanup array.
       (prune-complete-jobs)
       (enable-cleanup-signals)
-      
+
       (if in-foreground
         (if on-tty
           (fg-job j)
@@ -504,7 +504,7 @@
       j)
     ([e] # This error is unrecoverable to ensure things like running out of FD's
          # don't leave the terminal in an undefined state.
-      (file/write stderr (string "unrecoverable internal error: " e)) 
+      (file/write stderr (string "unrecoverable internal error: " e))
       (file/flush stderr)
       (os/exit 1))))
 
@@ -527,16 +527,16 @@
   []
   (or (os/getenv "HOME") ""))
 
-(defn- expand-getenv 
+(defn- expand-getenv
   [s]
-  (or 
+  (or
     (match s
       "PWD" (os/cwd)
       (os/getenv s))
     ""))
 
 (defn- tildhome
-  [s] 
+  [s]
   (string (get-home) "/"))
 
 (def- expand-parser (peg/compile
@@ -678,23 +678,23 @@
   (var fg true)
   (var pending-redir nil)
   (var pending-env-assign nil)
-  
+
   (defn handle-proc-form
     [f]
     (cond
-      (= '| f) (do 
+      (= '| f) (do
                  (array/push (job :procs) proc)
                  (set state :env)
                  (set proc (new-proc)))
       (= '& f) (do (set fg false) (set state :done))
-      
+
       (let [redir (parse-redir (string f))]
         (if (and (arg-symbol? f) redir)
           (if (redir 2)
             (array/push (proc :redirs) redir)
             (do (set pending-redir redir) (set state :redir)))
           (array/push (proc :args) (form-to-arg f))))))
-  
+
   (each f forms
     (match state
       :env
@@ -709,12 +709,12 @@
             (handle-proc-form f)))
       :env2
          (do
-          (put (proc :env) pending-env-assign 
+          (put (proc :env) pending-env-assign
             (if (arg-symbol? f)
               (string f)
               (tuple string f)))
           (set state :env))
-      :proc 
+      :proc
         (handle-proc-form f)
       :redir
         (do
@@ -729,7 +729,7 @@
       (array/push (job :procs) proc))
   (when (empty? (job :procs))
     (error "empty shell job"))
-  
+
   (each proc (job :procs)
     (put proc :args
       (tuple replace-builtins
@@ -748,42 +748,42 @@
 
 (defn out-lines
   "Return a function that calls f on each line of stdin.\n\n
-   writing the result to stdout if it is not nil.\n\n 
-   
+   writing the result to stdout if it is not nil.\n\n
+
    Example: \n\n
 
    (sh/$ echo \"a\\nb\\nc\" | (out-lines string/ascii-upper))"
   [f]
-  (do-lines 
+  (do-lines
     (fn [ln]
       (when-let [xln (f ln)]
         (file/write stdout xln)))))
 
 (defmacro $
-  "Execute a shell job (pipeline) in the foreground or background with 
+  "Execute a shell job (pipeline) in the foreground or background with
    a set of optional redirections for each process.\n\n
-  
-   If the job is a foreground job, this macro waits till the 
+
+   If the job is a foreground job, this macro waits till the
    job either stops, or exits. If the job exits with an error
    status the job raises an error.\n\n
 
-   If the job is a background job, this macro returns a the job table entry 
+   If the job is a background job, this macro returns a the job table entry
    that can be used to manage the job.\n\n
 
    Jobs take the exit code of the first failed process in the job with one
-   exception, processes that terminate due to SIGPIPE do not count towards the 
+   exception, processes that terminate due to SIGPIPE do not count towards the
    job exit code.\n\n
 
-   Symbols inside the $ are treated more or less like a traditional shell with 
+   Symbols inside the $ are treated more or less like a traditional shell with
    some exceptions:\n\n
-   
+
    - Janet keywords can be used to escape janet symbol rules. \n\n
    - A Janet call inside a job are treated as janet code janet mode.
-     Escaped janet code can return either a function in the place of a process name, strings, 
+     Escaped janet code can return either a function in the place of a process name, strings,
      or nested arrays of strings which are flattened on invocation. \n\n
-   - The quasiquote operator ~ is handled specially for convenience in simple cases, but 
+   - The quasiquote operator ~ is handled specially for convenience in simple cases, but
     for complex cases string quoting may be needed. \n\n
-   
+
    Examples:\n\n
 
    (sh/$ ls *.txt | cat )\n
@@ -816,7 +816,7 @@
           j)))))
 
 (defmacro $?
-  "Execute a shell job in the foreground or background with 
+  "Execute a shell job in the foreground or background with
    a set of optional redirections for each process returning the job exit code.\n\n
 
    See the $ documenation for examples and more detailed information about the
@@ -825,7 +825,7 @@
   (fn-$? forms))
 
 (defmacro $??
-  "Execute a shell job in the foreground or background with 
+  "Execute a shell job in the foreground or background with
    a set of optional redirections for each process returning true or false
    depending on whether the job was a success.\n\n
 
@@ -843,7 +843,7 @@
       ~(,job-output ,j)))
 
 (defmacro $$
-  "Execute a shell job in the foreground with 
+  "Execute a shell job in the foreground with
    a set of optional redirections for each process returning the job stdout as a string.\n\n
 
    See the $ documenation for examples and more detailed information about the
@@ -852,7 +852,7 @@
   (fn-$$ forms))
 
 (defmacro $$_
-  "Execute a shell job in the foreground with 
+  "Execute a shell job in the foreground with
    a set of optional redirections for each process returning
    the job stdout as a trimmed string.\n\n
 
@@ -870,7 +870,7 @@
       ~(,job-output-rc ,j)))
 
 (defmacro $$?
-  "Execute a shell job in the foreground with 
+  "Execute a shell job in the foreground with
    a set of optional redirections for each process returning
    a tuple of stdout and the job exit code.\n\n
 
@@ -880,7 +880,7 @@
   (fn-$$? forms))
 
 (defmacro $$_?
-  "Execute a shell job in the foreground with 
+  "Execute a shell job in the foreground with
    a set of optional redirections for each process returning
    a tuple of the trimmed stdout and the job exit code.\n\n
 
