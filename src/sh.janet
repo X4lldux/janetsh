@@ -103,6 +103,7 @@
     :tmodes nil   # Saved terminal modes of the job if it was stopped.
     :pgid nil     # Job process group id.
     :cleanup true # Cleanup on job on exit.
+    :foreground true
    })
 
 (defn- new-proc []
@@ -116,6 +117,41 @@
     :stopped false    # If the process has been stopped (Ctrl-Z).
     :stopsig nil      # Signal that stopped the process.
    })
+
+(defn build-proc
+  "Adds new process to the job"
+  [job]
+  (array/push (job :procs) (new-proc))
+  job)
+
+(defn env-var
+  "Sets new environment variable for the last process in a job."
+  [job e v]
+  (let [proc (array/peek (job :procs))]
+    (put (proc :env) e v))
+  job)
+
+(defn cmd
+  "Setups command and arguments for the last process in a job."
+  [job cmdn & args]
+  (let [proc (array/peek (job :procs))]
+    (array/push (proc :args) cmdn)
+    (each arg args
+      (array/push (proc :args) arg)))
+  job)
+
+(defn redir
+  "Setups redirection for the last process in a job."
+  [job from direction to]
+  (let [proc (array/peek (job :procs))]
+    (array/push (proc :redirs) @[from direction to]))
+  job)
+
+(defn background-job
+  "Sets job to be executed in background."
+  [job]
+  (set (job :foreground) false)
+  job)
 
 (defn update-proc-status
   [p status]
@@ -810,9 +846,10 @@
     (let [[j fg] (parse-job ;forms)]
     ~(do
       (let [j ,j]
-        (,launch-job j ,fg)
+        # (,launch-job j ,fg)
         (if ,fg
-          (,job-exit-code j)
+          # (,job-exit-code j)
+          j
           j)))))
 
 (defmacro $?
@@ -837,7 +874,8 @@
 
 (defn- fn-$$
   [forms]
-    (let [[j fg] (parse-job ;forms)]
+  (let [[j fg] (parse-job ;forms)]
+    (pp j)
       (when (not fg)
         (error "$$ does not support background jobs"))
       ~(,job-output ,j)))

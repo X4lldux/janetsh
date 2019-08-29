@@ -88,7 +88,8 @@
 
 (def- symchars
   "peg for valid janet symbol characters."
-  '(+ (range "09" "AZ" "az" "\x80\xFF") (set "!$%&*+-./:<?=>@^_|")))
+  '(+ (range "09" "AZ" "az" "\x80\xFF") (set "!$%&*+-./:<?=>@^_")))
+  # '(+ (range "09" "AZ" "az" "\x80\xFF") (set "!$%*+-./:?=@^_")))
 
 # Taken from https://github.com/bakpakin/mendoza/blob/master/mendoza/markup.janet
 (def- janet-value
@@ -133,20 +134,150 @@ symbol as a value, only structs, arrays, tuples, etc."
 (defn- add-colon [s]
   (string ":" s))
 
-(def- janetsh-grammar
+(defn- redir [fd r dst]
+  (let [fd (case [fd r]
+             ["" "<"] 0
+             ["" ">"] 1
+             ["" ">>"] 1
+             (scan-number fd))]
+    ~(sh/redir ,fd ,r ,dst)))
+
+(defn- pipe []
+  '(sh/build-proc))
+
+(defn- build-proc [& args]
+  (pp ['build-proc ;args])
+  ~((sh/build-proc) (sh/cmd ,;args)))
+
+(def- janetsh-grammar-old
   "Grammar to escape the non janet values with strings."
-  ~{:ws (capture (set " \v\t\r\f\n\0"))
-    :janet (capture (drop ,janet-value))
-    :pipe (capture "|")
-    :redirect (* (any (/ (capture (some (range "09"))) ,add-colon))  (capture (+ "<" ">" ">>")))
+  ~{:ws (set " \v\t\r\f\n\0")
+    :janet (* (drop (constant "(" )) (capture (drop ,janet-value)))
+    :pipe (/ "|" ,pipe)
+    :redirect (/ (* '(any (some (range "09"))) '(+ "<" ">" ">>") :token) ,redir)
     :hex (range "09" "af" "AF")
     :escape (* "\\" (+ (set "ntrvzf0e\"\\") (* "x" :hex :hex)))
-    :dquoted (capture (* "\"" (any (+ :escape (drop :ws) (if-not "\"" 1))) "\""))
-    :squoted  (* (/ (<- "'") ,to-dquote) (/ (<- (any (+ :escape (drop :ws) (if-not "'" 1)))) ,escape-dquotes) (/ (<- "'") ,to-dquote))
-    :envvar (capture (* "$" (some ,symchars)))
-    :token (/ (capture (some (+ ,symchars "\\ " "\\"))) ,as-str)
-    :value (+ :janet :pipe :redirect :envvar :token :ws :dquoted :squoted)
-    :main (% (any :value))})
+    # :dquoted (capture (* "\"" (any (+ :escape (drop :ws) (if-not "\"" 1))) "\""))
+    # :squoted  (* (/ (<- "'") ,to-dquote) (/ (<- (any (+ :escape (drop :ws) (if-not "'" 1)))) ,escape-dquotes) (/ (<- "'") ,to-dquote))
+    :envvar (* "$" (some ,symchars))
+    :token (some (+ ,symchars "\\ " "\\"))
+    # :value (+ :janet :pipe :redirect :envvar :token :ws :dquoted :squoted)
+    :cmd (/ (any (+ :ws '(+ :janet :token))) ,build-proc)
+    :value (+ :ws :pipe :redirect :envvar :cmd)
+    :main (any :value)
+   })
+
+(defmacro np [name]
+  ~(fn [& xs] (pp [,name ;xs]) ;xs))
+
+(defmacro pt [name]
+  ~(fn [& xs] (pp [,name ;xs]) true))
+
+(defn new-job [& exprs]
+  ~(-> (sh/new-job) ,;exprs))
+
+(defn build-proc []
+  '(sh/build-proc))
+
+(defn cmd [& args]
+  ~(sh/cmd ,;args))
+
+(defn eval-janet-expr [chunk]
+  (def p (parser/new))
+  (parser/consume p chunk)
+  (parser/eof p)
+  (parser/produce p))
+
+(defn shell-expr [& expr]
+  ~(-> (build-proc) ;,expr))
+
+(defn bg []
+  '(sh/background-job))
+
+(defn def-envvar [var val]
+  ~(sh/env-var ,var ,val))
+
+(defn pipe-janet-expr [expr]
+  ~(sh/pipe-janet-expr ',expr))
+
+(def faulty-peg
+  ~{
+    :int (range "09")
+    :ws (set " ")
+    :boom (/ (some (+ :ws ':int)) ,(fn [& xs] (pp xs) xs))
+    :main (some :boom)
+    }
+  )
+
+# TODO: first redirects need to support &>
+(def- janetsh-grammar
+  "Grammar to escape the non janet values with strings."
+  ~{
+    # char defs
+    :ws (set " \v\t\r\f")
+    :wss (any :ws)
+    :wsnl (set "\v\t\r\f\n")
+    :hex (range "09" "af" "AF")
+    :escape (* "\\" (+ (set "ntrvzf0e\"\\") (* "x" :hex :hex)))
+    :symchars (+ (range "09" "AZ" "az" "\x80\xFF") (set "!%*+-./:?=@^_()"))
+    :token (some (+ :symchars "\\" "\\"))
+
+
+    # janet
+    :escaped-janet-expr (* "$" :janet-expr)
+    :janet-form (/ (* (drop (constant "(")) ',janet-value) ,eval-janet-expr)
+    :janet-expr (* :wss :janet-form :wss)
+
+    # shell
+    :pipe "|"
+    :redirect (/ (*
+                  '(any (range "09"))
+                  :wss
+                  '(+ "<" ">" ">>")
+                  :wss
+                  ':token)
+                 ,redir)
+    :bg (/ "&" ,bg)
+
+    :dquoted '(* `"` (any (+ :inject-envvar :escape (drop :ws) (if-not `"` 1))) `"`)
+    :squoted '(* "'" (any (+ :escape (drop :ws) (if-not "'" 1))) "'")
+
+    :inject-envvar (* "$" (some ,symchars))
+    :def-envvar (/ (*
+                    '(some (if-not "=" :symchars))
+                    "="
+                    '(+ :squoted :dquoted :inject-envvar :token))
+                   ,def-envvar)
+
+    :token-not-redir (if-not (*
+                              (? (some (range "09")))
+                              :wss
+                              (+ "<" ">" ">>")
+                              :token)
+                       :token)
+    :cmd-form (/ (some (+ :ws (<- :token-not-redir))) ,cmd)
+
+    :shell-expr (*
+                 (/ 0 ,build-proc)
+                 :wss
+                 (? :def-envvar)
+                 (any :redirect)
+                 :cmd-form
+                 (any :redirect)
+                 (? :bg)
+                 (? (+
+                     (* :wss :bg)
+                     (* :wss :pipe :wss :cont-shell-expr)
+                     ))
+                 :wss
+                 )
+                 # (any (* (any :ws) :pipe :main)))
+    :cont-shell-expr (+ (/ :janet-expr ,pipe-janet-expr) :shell-expr)
+
+    :janetsh-expr (+ (some :janet-expr) (/ :shell-expr ,new-job))
+    :main (* :janetsh-expr -1)
+   })
+
 
 (defn- escape-raw-line [line]
   "Escape the non-janet values in 'line' as strings."
@@ -154,7 +285,82 @@ symbol as a value, only structs, arrays, tuples, etc."
 
 (defn erl [line]
   "Escape the non-janet values in 'line' as strings."
-  (print (escape-raw-line line)))
+  # (print (escape-raw-line line)))
+  (pp (peg/match janetsh-grammar line)))
+
+(defmacro test [l op r]
+  ~(let [res (escape-raw-line ,l)]
+     (if (,op res ',r)
+       (print `test "` ,l `" is ok`)
+       (do
+         (print ` `)
+         (print `test "` ,l `" is NOT ok`)
+         (pp res)
+         (print (string ` is not ` ',op))
+         (pp ',r)
+         (error (string `test "` ,l `"`)))
+       )
+     )
+  )
+
+(defn test-new-syntax []
+  (test "echo asdf" =
+        (-> (sh/new-job)
+            (sh/build-proc)
+            (sh/cmd "echo" "asdf")
+            ))
+
+  (test "   echo asdf  " =
+        (-> (sh/new-job)
+            (sh/build-proc)
+            (sh/cmd "echo" "asdf")
+            ))
+
+  (test " echo asdf <x  " =
+        (-> (sh/new-job)
+            (sh/build-proc)
+            (sh/cmd "echo" "asdf")
+            (sh/redir 0 "<" "x")
+            ))
+
+  (test " echo asdf <x &" =
+        (-> (sh/new-job)
+            (sh/build-proc)
+            (sh/cmd "echo" "asdf")
+            (sh/redir 0 "<" "x")
+            (sh/background-job)
+            ))
+
+  (test "<z echo asdf >x &" =
+        (-> (sh/new-job)
+            (sh/build-proc)
+            (sh/redir 0 "<" "z")
+            (sh/cmd "echo" "asdf")
+            (sh/redir 1 ">" "x")
+            (sh/background-job)
+            ))
+
+  (test "<z echo asdf 2>x &" =
+        (-> (sh/new-job)
+            (sh/build-proc)
+            (sh/redir 0 "<" "z")
+            (sh/cmd "echo" "asdf")
+            (sh/redir 2 ">" "x")
+            (sh/background-job)
+            ))
+
+  (test "echo asdf >a > s >d &" =
+        (-> (sh/new-job)
+            (sh/build-proc)
+            (sh/cmd "echo" "asdf")
+            (sh/redir 1 ">" "a")
+            (sh/redir 1 ">" "s")
+            (sh/redir 1 ">" "d")
+            (sh/background-job)
+            ))
+
+  'ok
+  )
 
 (defn- getchunk [buf p]
   (sh/update-all-jobs-status)
